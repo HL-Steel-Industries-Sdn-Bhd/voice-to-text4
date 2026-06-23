@@ -245,7 +245,7 @@
   <h1>🎙️ 语音转文字</h1>
   <div class="sub">🇨🇳 中文 · 🇺🇸 英文 · 🇲🇾 马来文 — 混合识别</div>
 
-  <!-- form + iframe 方式绕过 CORS -->
+  <!-- form + iframe 绕过 CORS -->
   <form id="uploadForm" action="" method="POST" target="hiddenIframe" enctype="application/x-www-form-urlencoded">
     <input type="hidden" name="audio" id="audioField">
     <input type="hidden" name="format" id="formatField" value="webm">
@@ -284,15 +284,13 @@
     "use strict";
 
     // ============================================================
-    // 👇 换成你的 GAS Web App URL（必须是以 /exec 结尾）
+    // 👇 唯一需要改的地方：换成你的 GAS Web App URL
     // ============================================================
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzKm4kiFpbpbBCC2he7EDdloYrYjUEO13sJtmrWeopicKO07YpWdi3gDrVf8yW3DUrW/exec';
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzDn6-RGgVk31Jtc46eDmQu_88Lqm3EZ5TNuzwkIwitFV_umfGJwlzHhYbCyKl8U_9-/exec';
     // ============================================================
 
-    // 设置 form 的 action
     document.getElementById('uploadForm').action = GAS_URL;
 
-    // DOM 引用
     const micBtn = document.getElementById('micButton');
     const statusText = document.getElementById('statusText');
     const statusDot = document.getElementById('statusDot');
@@ -303,28 +301,20 @@
     const audioField = document.getElementById('audioField');
     const formatField = document.getElementById('formatField');
 
-    // 状态
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
     let finalText = '';
     let isProcessing = false;
-    let iframeLoaded = false;
 
-    // ---------- 状态显示 ----------
     function setStatus(text, type) {
       statusText.textContent = text;
       statusDot.className = 'dot';
-      if (type === 'recording') {
-        statusDot.classList.add('recording');
-      } else if (type === 'success') {
-        statusDot.classList.add('success');
-      } else if (type === 'error') {
-        statusDot.classList.add('error');
-      }
+      if (type === 'recording') statusDot.classList.add('recording');
+      else if (type === 'success') statusDot.classList.add('success');
+      else if (type === 'error') statusDot.classList.add('error');
     }
 
-    // ---------- 更新结果 ----------
     function updateResult() {
       if (finalText.trim() === '') {
         resultDisplay.innerHTML = '<span class="empty">等待识别…</span>';
@@ -335,13 +325,13 @@
       }
     }
 
-    // ---------- 处理 iframe 返回的数据 ----------
-    function handleIframeResponse() {
+    // iframe 回调
+    window.handleIframeResponse = function() {
       try {
         const iframe = document.getElementById('hiddenIframe');
         const content = iframe.contentDocument || iframe.contentWindow.document;
         const bodyText = content.body ? content.body.innerText : '';
-        
+
         if (!bodyText || bodyText.trim() === '') {
           return;
         }
@@ -350,7 +340,6 @@
 
         if (result.error) {
           setStatus('❌ ' + result.error, 'error');
-          console.error('后端错误:', result.error);
           alert('识别失败：' + result.error);
         } else if (result.text) {
           finalText = result.text.trim();
@@ -359,37 +348,25 @@
         } else {
           setStatus('⚠️ 没有识别到文字', 'error');
         }
-
       } catch (e) {
-        // 可能是空的 iframe，忽略
-        console.log('iframe 加载完成，等待响应...');
+        console.error('解析响应出错:', e);
       } finally {
         isProcessing = false;
         micBtn.disabled = false;
         micBtn.classList.remove('listening');
         micBtn.textContent = '🎤';
       }
-    }
+    };
 
-    // 暴露给 iframe 的 onload 调用
-    window.handleIframeResponse = handleIframeResponse;
-
-    // ---------- 录音 ----------
+    // 录音
     async function startRecording() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { sampleRate: 16000 } 
-        });
-        
-        mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm'
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         audioChunks = [];
 
         mediaRecorder.ondataavailable = function(event) {
-          if (event.data.size > 0) {
-            audioChunks.push(event.data);
-          }
+          if (event.data.size > 0) audioChunks.push(event.data);
         };
 
         mediaRecorder.onstop = function() {
@@ -398,7 +375,7 @@
           if (audioBlob.size > 0) {
             sendAudioViaForm(audioBlob);
           } else {
-            setStatus('⚠️ 录音为空，请重试', 'error');
+            setStatus('⚠️ 录音为空', 'error');
             isProcessing = false;
             micBtn.disabled = false;
             micBtn.classList.remove('listening');
@@ -411,11 +388,9 @@
         micBtn.classList.add('listening');
         micBtn.textContent = '⏹️';
         setStatus('🎙️ 正在录音… 点击停止', 'recording');
-
       } catch (error) {
-        console.error('麦克风错误:', error);
-        setStatus('❌ 无法访问麦克风，请授权', 'error');
-        alert('无法访问麦克风，请检查浏览器权限设置。');
+        setStatus('❌ 无法访问麦克风', 'error');
+        alert('请授权麦克风权限');
       }
     }
 
@@ -429,10 +404,9 @@
       }
     }
 
-    // ---------- 通过 form 提交音频（绕过 CORS） ----------
+    // 通过 form 提交
     async function sendAudioViaForm(audioBlob) {
       try {
-        // 转 Base64
         const arrayBuffer = await audioBlob.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
         let binary = '';
@@ -441,14 +415,9 @@
         }
         const base64 = btoa(binary);
 
-        // 填入 form 字段
         audioField.value = base64;
         formatField.value = 'webm';
-
-        // 提交 form
-        const form = document.getElementById('uploadForm');
-        form.submit();
-
+        document.getElementById('uploadForm').submit();
       } catch (error) {
         console.error('提交失败:', error);
         setStatus('❌ 提交失败', 'error');
@@ -459,7 +428,7 @@
       }
     }
 
-    // ---------- 按钮事件 ----------
+    // 事件绑定
     micBtn.addEventListener('click', function() {
       if (isProcessing) return;
       if (isRecording) {
@@ -471,38 +440,27 @@
 
     copyBtn.addEventListener('click', function() {
       const text = finalText.trim();
-      if (!text) {
-        alert('没有文字可复制');
-        return;
-      }
+      if (!text) { alert('没有文字可复制'); return; }
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(() => {
           const orig = copyBtn.textContent;
           copyBtn.textContent = '✅ 已复制!';
           setTimeout(() => { copyBtn.textContent = orig; }, 1500);
-        }).catch(() => fallbackCopy(text));
+        });
       } else {
-        fallbackCopy(text);
-      }
-    });
-
-    function fallbackCopy(text) {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      document.body.appendChild(ta);
-      ta.select();
-      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
         document.execCommand('copy');
+        document.body.removeChild(ta);
         const orig = copyBtn.textContent;
         copyBtn.textContent = '✅ 已复制!';
         setTimeout(() => { copyBtn.textContent = orig; }, 1500);
-      } catch(e) {
-        alert('复制失败，请手动复制');
       }
-      document.body.removeChild(ta);
-    }
+    });
 
     clearBtn.addEventListener('click', function() {
       finalText = '';
@@ -510,15 +468,13 @@
       setStatus('🗑️ 已清空', '');
     });
 
-    // ---------- 初始化 ----------
+    // 初始化
     updateResult();
     setStatus('● 点击麦克风开始说话', '');
-
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setStatus('❌ 浏览器不支持录音', 'error');
       micBtn.disabled = true;
     }
-
   })();
 </script>
 </body>
